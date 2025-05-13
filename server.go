@@ -115,21 +115,30 @@ func FindRecipeBFS(target string) *Node {
 			continue
 		}
 
+		validCombos := []Combination{}
 		for _, comb := range combinations[current] {
 			if tierMap[comb.Left] < tierMap[current] && tierMap[comb.Right] < tierMap[current] {
-				fmt.Printf("  Checking combination: %s (tier %d) + %s (tier %d) = %s (tier %d)\n", 
-					comb.Left, tierMap[comb.Left], comb.Right, tierMap[comb.Right], comb.Root, comb.Tier)
-				if !visited[comb.Left] {
-					queue = append(queue, comb.Left)
-					fmt.Printf("    Added to queue: %s\n", comb.Left)
-				}
-				if !visited[comb.Right] {
-					queue = append(queue, comb.Right)
-					fmt.Printf("    Added to queue: %s\n", comb.Right)
-				}
-			} else {
-				fmt.Printf("  Skipping invalid combination: %s (tier %d) + %s (tier %d) = %s (tier %d)\n",
-					comb.Left, tierMap[comb.Left], comb.Right, tierMap[comb.Right], comb.Root, comb.Tier)
+				validCombos = append(validCombos, comb)
+			}
+		}
+
+		sort.SliceStable(validCombos, func(i, j int) bool {
+			iDiff := (tierMap[current] - tierMap[validCombos[i].Left]) + (tierMap[current] - tierMap[validCombos[i].Right])
+			jDiff := (tierMap[current] - tierMap[validCombos[j].Left]) + (tierMap[current] - tierMap[validCombos[j].Right])
+			return iDiff > jDiff
+		})
+
+		for _, comb := range validCombos {
+			fmt.Printf("  Checking combination: %s (tier %d) + %s (tier %d) = %s (tier %d)\n", 
+				comb.Left, tierMap[comb.Left], comb.Right, tierMap[comb.Right], comb.Root, comb.Tier)
+			
+			if !visited[comb.Left] {
+				queue = append(queue, comb.Left)
+				fmt.Printf("    Added to queue: %s\n", comb.Left)
+			}
+			if !visited[comb.Right] {
+				queue = append(queue, comb.Right)
+				fmt.Printf("    Added to queue: %s\n", comb.Right)
 			}
 		}
 	}
@@ -211,119 +220,447 @@ func FindRecipeDFS(target string, visited map[string]bool) *Node {
 	return nil
 }
 
+func FindMultipleRecipesDFS(target string) []*Node {
+	fmt.Printf("\n=== Starting Multiple DFS search for: %s ===\n", target)
+	
+	if isBasic(target) {
+		fmt.Printf("Found basic element: %s\n", target)
+		DFSVisitedCount = 1
+		return []*Node{{Element: target}}
+	}
+
+	if _, exists := combinations[target]; !exists {
+		fmt.Printf("Element %s not found in combinations\n", target)
+		DFSVisitedCount = 0
+		return nil
+	}
+
+	visited := make(map[string]bool)
+	recipeMap := make(map[string][]*Node)
+	DFSVisitedCount = 0
+
+	var findRecipes func(elem string) []*Node
+	findRecipes = func(elem string) []*Node {
+		if isBasic(elem) {
+			DFSVisitedCount++
+			return []*Node{{Element: elem}}
+		}
+
+		if visited[elem] {
+			return nil
+		}
+
+		visited[elem] = true
+		DFSVisitedCount++
+		defer func() { visited[elem] = false }()
+
+		if recipes, exists := recipeMap[elem]; exists {
+			return recipes
+		}
+
+		var recipes []*Node
+		for _, comb := range combinations[elem] {
+			if tierMap[comb.Left] < tierMap[elem] && tierMap[comb.Right] < tierMap[elem] {
+				leftRecipes := findRecipes(comb.Left)
+				if len(leftRecipes) == 0 {
+					continue
+				}
+				rightRecipes := findRecipes(comb.Right)
+				if len(rightRecipes) == 0 {
+					continue
+				}
+
+				for _, left := range leftRecipes {
+					for _, right := range rightRecipes {
+						fmt.Printf("Found recipe for %s: %s + %s\n", 
+							elem, comb.Left, comb.Right)
+						recipes = append(recipes, &Node{
+							Element: elem,
+							Left:    left,
+							Right:   right,
+						})
+					}
+				}
+			}
+		}
+
+		recipeMap[elem] = recipes
+		return recipes
+	}
+
+	results := findRecipes(target)
+	if len(results) > 0 {
+		fmt.Printf("\nSuccessfully found %d recipes for %s\n", len(results), target)
+	} else {
+		fmt.Printf("\nNo valid recipe found for %s\n", target)
+	}
+	return results
+}
+
+func FindMultipleRecipesBidirectional(target string) []*Node {
+	fmt.Printf("\n=== Starting Multiple Bidirectional Search ===\n")
+	fmt.Printf("Target: %s (Tier: %d)\n", target, tierMap[target])
+	basics := getSortedBasicElements()
+	fmt.Printf("Start Elements: %v\n", basics)
+
+	if isBasic(target) {
+		fmt.Printf("Target is a basic element, returning direct node\n")
+		return []*Node{{Element: target}}
+	}
+	if _, exists := combinations[target]; !exists {
+		fmt.Printf("Target element not found in combinations\n")
+		return nil
+	}
+
+	forwardVisited := make(map[string][]*Node)
+	forwardQueue := []string{}
+	for _, b := range basics {
+		forwardVisited[b] = []*Node{{Element: b}}
+		forwardQueue = append(forwardQueue, b)
+	}
+	
+	backwardVisited := make(map[string]bool)
+	backwardQueue := []string{target}
+	backwardVisited[target] = true
+	
+	BidirectionalVisitedCount = len(basics) + 1
+	fmt.Printf("Initialized bidirectional search\n")
+
+	var results []*Node
+	for len(forwardQueue) > 0 && len(backwardQueue) > 0 {
+		currentForward := forwardQueue[0]
+		forwardQueue = forwardQueue[1:]
+		fmt.Printf("\nForward exploring from: %s (Tier: %d)\n", currentForward, tierMap[currentForward])
+
+		if backwardVisited[currentForward] {
+			fmt.Printf("Found intersection at: %s\n", currentForward)
+			forwardPaths := forwardVisited[currentForward]
+			
+			for _, comb := range combinations[target] {
+				if comb.Left == currentForward || comb.Right == currentForward {
+					var otherElement string
+					if comb.Left == currentForward {
+						otherElement = comb.Right
+					} else {
+						otherElement = comb.Left
+					}
+					
+					if otherNodes, exists := forwardVisited[otherElement]; exists {
+						for _, forwardPath := range forwardPaths {
+							for _, otherNode := range otherNodes {
+								results = append(results, &Node{
+									Element: target,
+									Left:   forwardPath,
+									Right:  otherNode,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for _, comb := range combinations {
+			for _, c := range comb {
+				if (c.Left == currentForward || c.Right == currentForward) &&
+					len(forwardVisited[c.Left]) > 0 && len(forwardVisited[c.Right]) > 0 &&
+					tierMap[c.Left] < tierMap[c.Root] && tierMap[c.Right] < tierMap[c.Root] {
+					
+					if _, exists := forwardVisited[c.Root]; !exists {
+						fmt.Printf("  Forward found: %s + %s = %s\n", c.Left, c.Right, c.Root)
+						for _, left := range forwardVisited[c.Left] {
+							for _, right := range forwardVisited[c.Right] {
+								forwardVisited[c.Root] = append(forwardVisited[c.Root], &Node{
+									Element: c.Root,
+									Left:    left,
+									Right:   right,
+								})
+							}
+						}
+						forwardQueue = append(forwardQueue, c.Root)
+						BidirectionalVisitedCount++
+					}
+				}
+			}
+		}
+
+		currentBackward := backwardQueue[0]
+		backwardQueue = backwardQueue[1:]
+		fmt.Printf("\nBackward exploring from: %s (Tier: %d)\n", currentBackward, tierMap[currentBackward])
+
+		for _, comb := range combinations {
+			for _, c := range comb {
+				if c.Root == currentBackward {
+					if !backwardVisited[c.Left] {
+						backwardVisited[c.Left] = true
+						backwardQueue = append(backwardQueue, c.Left)
+						BidirectionalVisitedCount++
+					}
+					if !backwardVisited[c.Right] {
+						backwardVisited[c.Right] = true
+						backwardQueue = append(backwardQueue, c.Right)
+						BidirectionalVisitedCount++
+					}
+				}
+			}
+		}
+	}
+
+	if len(results) > 0 {
+		fmt.Printf("\nSuccessfully found %d recipes for %s\n", len(results), target)
+	} else {
+		fmt.Printf("\nNo valid recipe found for %s\n", target)
+	}
+	return results
+}
+
 func FindMultipleRecipes(target string, maxCount int, algorithm string) []*Node {
 	if isBasic(target) {
 		atomic.StoreInt32(&MultiVisitedCount, 1)
 		return []*Node{{Element: target}}
 	}
+
 	if _, exists := combinations[target]; !exists {
 		return nil
 	}
-
 	atomic.StoreInt32(&MultiVisitedCount, 0)
 	var results []*Node
-	resultChan := make(chan *Node, maxCount*16)
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, 300)
-	var seen sync.Map
-	validCombos := []Combination{}
+	var mu sync.Mutex
 
-	targetTier := tierMap[target]
-	
-	for _, c := range combinations[target] {
-		if tierMap[c.Left] < targetTier && tierMap[c.Right] < targetTier {
-			leftTierDiff := targetTier - tierMap[c.Left]
-			rightTierDiff := targetTier - tierMap[c.Right]
-			avgTierDiff := (leftTierDiff + rightTierDiff) / 2
-			
-			c.Tier = avgTierDiff
-			validCombos = append(validCombos, c)
+	recipeCache := sync.Map{}
+	seen := sync.Map{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var findRecipeWithAlgorithm func(elem string) []*Node
+	switch algorithm {
+	case "bfs":
+		findRecipeWithAlgorithm = func(elem string) []*Node {
+			if nodes := FindMultipleRecipesBFS(elem); nodes != nil {
+				atomic.AddInt32(&MultiVisitedCount, int32(GetBFSVisited()))
+				return nodes
+			}
+			return nil
+		}
+	case "dfs":
+		findRecipeWithAlgorithm = func(elem string) []*Node {
+			if nodes := FindMultipleRecipesDFS(elem); nodes != nil {
+				atomic.AddInt32(&MultiVisitedCount, int32(GetDFSVisited()))
+				return nodes
+			}
+			return nil
+		}
+	case "bidirectional":
+		findRecipeWithAlgorithm = func(elem string) []*Node {
+			if nodes := FindMultipleRecipesBidirectional(elem); nodes != nil {
+				atomic.AddInt32(&MultiVisitedCount, int32(GetBidirectionalVisited()))
+				return nodes
+			}
+			return nil
+		}
+	default:
+		findRecipeWithAlgorithm = func(elem string) []*Node {
+			if nodes := FindMultipleRecipesBFS(elem); nodes != nil {
+				atomic.AddInt32(&MultiVisitedCount, int32(GetBFSVisited()))
+				return nodes
+			}
+			return nil
 		}
 	}
 
-	sort.SliceStable(validCombos, func(i, j int) bool {
-		if validCombos[i].Tier != validCombos[j].Tier {
-			return validCombos[i].Tier < validCombos[j].Tier
+	var findAllCombinations func(elem string) [][]Combination
+	findAllCombinations = func(elem string) [][]Combination {
+		var allCombos [][]Combination
+		for _, c := range combinations[elem] {
+			if tierMap[c.Left] < tierMap[elem] && tierMap[c.Right] < tierMap[elem] {
+				allCombos = append(allCombos, []Combination{c})
+			}
 		}
-		return len(validCombos[i].Left)+len(validCombos[i].Right) < len(validCombos[j].Left)+len(validCombos[j].Right)
-	})
+		return allCombos
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-	defer cancel()
-
-	exploreCombination := func(c Combination) {
-		defer wg.Done()
-		defer func() { <-semaphore }()
-
-		variations := []struct {
-			left  string
-			right string
-		}{
-			{c.Left, c.Right},
-			{c.Right, c.Left},
+	var findRecipe func(ctx context.Context, elem string, visited map[string]bool) []*Node
+	findRecipe = func(ctx context.Context, elem string, visited map[string]bool) []*Node {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
 		}
 
-		for _, v := range variations {
-			for _, leftComb := range combinations[target] {
-				if tierMap[leftComb.Left] < targetTier && tierMap[leftComb.Right] < targetTier {
-					visited := make(map[string]bool)
-					var left *Node
-					
-					switch algorithm {
-					case "bfs":
-						left = FindRecipeBFS(v.left)
-						atomic.AddInt32(&MultiVisitedCount, int32(GetBFSVisited()))
-					case "dfs":
-						left = FindRecipeDFS(v.left, visited)
-						atomic.AddInt32(&MultiVisitedCount, int32(GetDFSVisited()))
-					case "bidirectional":
-						left = FindRecipeBidirectional(v.left)
-						atomic.AddInt32(&MultiVisitedCount, int32(GetBidirectionalVisited()))
-					default:
-						left = exploreRecipe(v.left, visited, &MultiVisitedCount, algorithm)
-					}
+		if isBasic(elem) {
+			atomic.AddInt32(&MultiVisitedCount, 1)
+			return []*Node{{Element: elem}}
+		}
 
-					if left == nil {
-						continue
-					}
+		if visited == nil {
+			visited = make(map[string]bool)
+		}
 
-					for _, rightComb := range combinations[target] {
-						if tierMap[rightComb.Left] < targetTier && tierMap[rightComb.Right] < targetTier {
-							rightVisited := copyVisitedMap(visited)
-							var right *Node
-							
-							switch algorithm {
-							case "bfs":
-								right = FindRecipeBFS(v.right)
-								atomic.AddInt32(&MultiVisitedCount, int32(GetBFSVisited()))
-							case "dfs":
-								right = FindRecipeDFS(v.right, rightVisited)
-								atomic.AddInt32(&MultiVisitedCount, int32(GetDFSVisited()))
-							case "bidirectional":
-								right = FindRecipeBidirectional(v.right)
-								atomic.AddInt32(&MultiVisitedCount, int32(GetBidirectionalVisited()))
-							default:
-								right = exploreRecipe(v.right, rightVisited, &MultiVisitedCount, algorithm)
-							}
+		if visited[elem] {
+			return nil
+		}
 
-							if right == nil {
-								continue
-							}
+		visited[elem] = true
+		defer func() { visited[elem] = false }()
 
-							trees := []*Node{
-								{Element: target, Left: left, Right: right},
-								{Element: target, Left: right, Right: left},
-							}
+		if cached, ok := recipeCache.Load(elem); ok {
+			return cached.([]*Node)
+		}
 
-							for _, tree := range trees {
-								signature := serializeTree(tree)
-								if _, ok := seen.LoadOrStore(signature, true); !ok {
-									select {
-									case resultChan <- tree:
-									case <-ctx.Done():
-										return
-									}
+		var localResults []*Node
+	
+		allCombos := findAllCombinations(elem)
+
+		for _, comboGroup := range allCombos {
+			for _, c := range comboGroup {
+				leftRecipes := findRecipeWithAlgorithm(c.Left)
+				if len(leftRecipes) == 0 {
+					continue
+				}
+				rightRecipes := findRecipeWithAlgorithm(c.Right)
+				if len(rightRecipes) == 0 {
+					continue
+				}
+
+				for _, left := range leftRecipes {
+					for _, right := range rightRecipes {
+						node := &Node{Element: elem, Left: left, Right: right}
+						if elem == target {
+							signature := serializeTree(node)
+							if _, exists := seen.LoadOrStore(signature, true); !exists {
+								mu.Lock()
+								if len(results) < maxCount {
+									results = append(results, node)
 								}
+								mu.Unlock()
+								if len(results) >= maxCount {
+									cancel()
+									return localResults
+								}
+							}
+						}
+						localResults = append(localResults, node)
+						atomic.AddInt32(&MultiVisitedCount, 1)
+					}
+				}
+			}
+		}
+		if len(localResults) > 0 {
+			sort.Slice(localResults, func(i, j int) bool {
+				return treeDepth(localResults[i]) < treeDepth(localResults[j])
+			})
+			recipeCache.Store(elem, localResults)
+		}
+		return localResults
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		findRecipe(ctx, target, nil)
+	}()
+	wg.Wait()
+
+	if len(results) > 0 {
+		sort.Slice(results, func(i, j int) bool {
+			return treeDepth(results[i]) < treeDepth(results[j])
+		})
+	}
+	return results
+}
+
+func FindMultipleRecipesBFS(target string) []*Node {
+	fmt.Printf("\n=== Starting Multiple BFS search for: %s ===\n", target)
+	
+	if isBasic(target) {
+		fmt.Printf("Found basic element: %s\n", target)
+		BFSVisitedCount = 1
+		return []*Node{{Element: target}}
+	}
+
+	if _, exists := combinations[target]; !exists {
+		fmt.Printf("Element %s not found in combinations\n", target)
+		BFSVisitedCount = 0
+		return nil
+	}
+
+	fmt.Printf("Found %d combinations for %s\n", len(combinations[target]), target)
+	visited := make(map[string]bool)
+	recipeMap := make(map[string][]*Node)
+	queue := []string{target}
+	BFSVisitedCount = 0
+
+	fmt.Println("\nFirst pass: Collecting combinations...")
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if visited[current] {
+			continue
+		}
+		visited[current] = true
+		BFSVisitedCount++
+		fmt.Printf("Visiting: %s (visited count: %d)\n", current, BFSVisitedCount)
+
+		if isBasic(current) {
+			fmt.Printf("Found basic element: %s\n", current)
+			recipeMap[current] = []*Node{{Element: current}}
+			continue
+		}
+
+		validCombos := []Combination{}
+		for _, comb := range combinations[current] {
+			if tierMap[comb.Left] < tierMap[current] && tierMap[comb.Right] < tierMap[current] {
+				validCombos = append(validCombos, comb)
+			}
+		}
+
+		sort.SliceStable(validCombos, func(i, j int) bool {
+			iDiff := (tierMap[current] - tierMap[validCombos[i].Left]) + (tierMap[current] - tierMap[validCombos[i].Right])
+			jDiff := (tierMap[current] - tierMap[validCombos[j].Left]) + (tierMap[current] - tierMap[validCombos[j].Right])
+			return iDiff > jDiff
+		})
+
+		for _, comb := range validCombos {
+			fmt.Printf("  Checking combination: %s (tier %d) + %s (tier %d) = %s (tier %d)\n", 
+				comb.Left, tierMap[comb.Left], comb.Right, tierMap[comb.Right], comb.Root, comb.Tier)
+			
+			if !visited[comb.Left] {
+				queue = append(queue, comb.Left)
+				fmt.Printf("    Added to queue: %s\n", comb.Left)
+			}
+			if !visited[comb.Right] {
+				queue = append(queue, comb.Right)
+				fmt.Printf("    Added to queue: %s\n", comb.Right)
+			}
+		}
+	}
+
+	fmt.Println("\nSecond pass: Building recipes...")
+	changed := true
+	for changed {
+		changed = false
+		for elem := range visited {
+			if len(recipeMap[elem]) > 0 {
+				continue
+			}
+
+			for _, comb := range combinations[elem] {
+				if tierMap[comb.Left] < tierMap[elem] && tierMap[comb.Right] < tierMap[elem] {
+					leftRecipes := recipeMap[comb.Left]
+					rightRecipes := recipeMap[comb.Right]
+					if len(leftRecipes) > 0 && len(rightRecipes) > 0 {
+						for _, left := range leftRecipes {
+							for _, right := range rightRecipes {
+								fmt.Printf("Found recipe for %s: %s + %s\n", 
+									elem, comb.Left, comb.Right)
+								recipeMap[elem] = append(recipeMap[elem], &Node{
+									Element: elem,
+									Left:    left,
+									Right:   right,
+								})
+								changed = true
 							}
 						}
 					}
@@ -332,39 +669,12 @@ func FindMultipleRecipes(target string, maxCount int, algorithm string) []*Node 
 		}
 	}
 
-	for _, comb := range validCombos {
-		select {
-		case <-ctx.Done():
-			break
-		default:
-			wg.Add(1)
-			semaphore <- struct{}{}
-			go exploreCombination(comb)
-		}
+	results := recipeMap[target]
+	if len(results) > 0 {
+		fmt.Printf("\nSuccessfully found %d recipes for %s\n", len(results), target)
+	} else {
+		fmt.Printf("\nNo valid recipe found for %s\n", target)
 	}
-
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	results = make([]*Node, 0, maxCount)
-	for recipe := range resultChan {
-		results = append(results, recipe)
-		if len(results) >= maxCount {
-			cancel()
-			break
-		}
-	}
-
-	if len(results) > maxCount {
-		rand.Seed(time.Now().UnixNano())
-		rand.Shuffle(len(results), func(i, j int) {
-			results[i], results[j] = results[j], results[i]
-		})
-		results = results[:maxCount]
-	}
-
 	return results
 }
 
@@ -463,117 +773,117 @@ func exploreRecipe(target string, visited map[string]bool, counter *int32, algor
 }
 
 func getSortedBasicElements() []string {
-    basics := []string{}
-    for elem := range tierMap {
-        if isBasic(elem) {
-            basics = append(basics, elem)
-        }
-    }
-    sort.Strings(basics)
-    return basics
+	basics := []string{}
+	for elem := range tierMap {
+		if isBasic(elem) {
+			basics = append(basics, elem)
+		}
+	}
+	sort.Strings(basics)
+	return basics
 }
 
 func FindRecipeBidirectional(target string) *Node {
-    fmt.Printf("\n=== Starting Bidirectional Search ===\n")
-    fmt.Printf("Target: %s (Tier: %d)\n", target, tierMap[target])
-    basics := getSortedBasicElements()
-    fmt.Printf("Start Elements: %v\n", basics)
+	fmt.Printf("\n=== Starting Bidirectional Search ===\n")
+	fmt.Printf("Target: %s (Tier: %d)\n", target, tierMap[target])
+	basics := getSortedBasicElements()
+	fmt.Printf("Start Elements: %v\n", basics)
 
-    if isBasic(target) {
-        fmt.Printf("Target is a basic element, returning direct node\n")
-        return &Node{Element: target}
-    }
-    if _, exists := combinations[target]; !exists {
-        fmt.Printf("Target element not found in combinations\n")
-        return nil
-    }
+	if isBasic(target) {
+		fmt.Printf("Target is a basic element, returning direct node\n")
+		return &Node{Element: target}
+	}
+	if _, exists := combinations[target]; !exists {
+		fmt.Printf("Target element not found in combinations\n")
+		return nil
+	}
 
-    forwardVisited := make(map[string]*Node)
-    forwardQueue := []string{}
-    for _, b := range basics {
-        forwardVisited[b] = &Node{Element: b}
-        forwardQueue = append(forwardQueue, b)
-    }
-    
-    backwardVisited := make(map[string]bool)
-    backwardQueue := []string{target}
-    backwardVisited[target] = true
-    
-    BidirectionalVisitedCount = len(basics) + 1
-    fmt.Printf("Initialized bidirectional search\n")
+	forwardVisited := make(map[string]*Node)
+	forwardQueue := []string{}
+	for _, b := range basics {
+		forwardVisited[b] = &Node{Element: b}
+		forwardQueue = append(forwardQueue, b)
+	}
+	
+	backwardVisited := make(map[string]bool)
+	backwardQueue := []string{target}
+	backwardVisited[target] = true
+	
+	BidirectionalVisitedCount = len(basics) + 1
+	fmt.Printf("Initialized bidirectional search\n")
 
-    for len(forwardQueue) > 0 && len(backwardQueue) > 0 {
-        currentForward := forwardQueue[0]
-        forwardQueue = forwardQueue[1:]
-        fmt.Printf("\nForward exploring from: %s (Tier: %d)\n", currentForward, tierMap[currentForward])
+	for len(forwardQueue) > 0 && len(backwardQueue) > 0 {
+		currentForward := forwardQueue[0]
+		forwardQueue = forwardQueue[1:]
+		fmt.Printf("\nForward exploring from: %s (Tier: %d)\n", currentForward, tierMap[currentForward])
 
-        if backwardVisited[currentForward] {
-            fmt.Printf("Found intersection at: %s\n", currentForward)
-            forwardPath := forwardVisited[currentForward]
-            
-            for _, comb := range combinations[target] {
-                if comb.Left == currentForward || comb.Right == currentForward {
-                    var otherElement string
-                    if comb.Left == currentForward {
-                        otherElement = comb.Right
-                    } else {
-                        otherElement = comb.Left
-                    }
-                    
-                    if otherNode, exists := forwardVisited[otherElement]; exists {
-                        return &Node{
-                            Element: target,
-                            Left:   forwardPath,
-                            Right:  otherNode,
-                        }
-                    }
-                }
-            }
-        }
+		if backwardVisited[currentForward] {
+			fmt.Printf("Found intersection at: %s\n", currentForward)
+			forwardPath := forwardVisited[currentForward]
+			
+			for _, comb := range combinations[target] {
+				if comb.Left == currentForward || comb.Right == currentForward {
+					var otherElement string
+					if comb.Left == currentForward {
+						otherElement = comb.Right
+					} else {
+						otherElement = comb.Left
+					}
+					
+					if otherNode, exists := forwardVisited[otherElement]; exists {
+						return &Node{
+							Element: target,
+							Left:   forwardPath,
+							Right:  otherNode,
+						}
+					}
+				}
+			}
+		}
 
-        for _, comb := range combinations {
-            for _, c := range comb {
-                if (c.Left == currentForward || c.Right == currentForward) &&
-                    forwardVisited[c.Left] != nil && forwardVisited[c.Right] != nil &&
-                    tierMap[c.Left] < tierMap[c.Root] && tierMap[c.Right] < tierMap[c.Root] {
-                    
-                    if _, exists := forwardVisited[c.Root]; !exists {
-                        fmt.Printf("  Forward found: %s + %s = %s\n", c.Left, c.Right, c.Root)
-                        forwardVisited[c.Root] = &Node{
-                            Element: c.Root,
-                            Left:    forwardVisited[c.Left],
-                            Right:   forwardVisited[c.Right],
-                        }
-                        forwardQueue = append(forwardQueue, c.Root)
-                        BidirectionalVisitedCount++
-                    }
-                }
-            }
-        }
+		for _, comb := range combinations {
+			for _, c := range comb {
+				if (c.Left == currentForward || c.Right == currentForward) &&
+					forwardVisited[c.Left] != nil && forwardVisited[c.Right] != nil &&
+					tierMap[c.Left] < tierMap[c.Root] && tierMap[c.Right] < tierMap[c.Root] {
+					
+					if _, exists := forwardVisited[c.Root]; !exists {
+						fmt.Printf("  Forward found: %s + %s = %s\n", c.Left, c.Right, c.Root)
+						forwardVisited[c.Root] = &Node{
+							Element: c.Root,
+							Left:    forwardVisited[c.Left],
+							Right:   forwardVisited[c.Right],
+						}
+						forwardQueue = append(forwardQueue, c.Root)
+						BidirectionalVisitedCount++
+					}
+				}
+			}
+		}
 
-        currentBackward := backwardQueue[0]
-        backwardQueue = backwardQueue[1:]
-        fmt.Printf("\nBackward exploring from: %s (Tier: %d)\n", currentBackward, tierMap[currentBackward])
+		currentBackward := backwardQueue[0]
+		backwardQueue = backwardQueue[1:]
+		fmt.Printf("\nBackward exploring from: %s (Tier: %d)\n", currentBackward, tierMap[currentBackward])
 
-        for _, comb := range combinations {
-            for _, c := range comb {
-                if c.Root == currentBackward {
-                    if !backwardVisited[c.Left] {
-                        backwardVisited[c.Left] = true
-                        backwardQueue = append(backwardQueue, c.Left)
-                        BidirectionalVisitedCount++
-                    }
-                    if !backwardVisited[c.Right] {
-                        backwardVisited[c.Right] = true
-                        backwardQueue = append(backwardQueue, c.Right)
-                        BidirectionalVisitedCount++
-                    }
-                }
-            }
-        }
-    }
+		for _, comb := range combinations {
+			for _, c := range comb {
+				if c.Root == currentBackward {
+					if !backwardVisited[c.Left] {
+						backwardVisited[c.Left] = true
+						backwardQueue = append(backwardQueue, c.Left)
+						BidirectionalVisitedCount++
+					}
+					if !backwardVisited[c.Right] {
+						backwardVisited[c.Right] = true
+						backwardQueue = append(backwardQueue, c.Right)
+						BidirectionalVisitedCount++
+					}
+				}
+			}
+		}
+	}
 
-    return nil
+	return nil
 }
 
 func copyVisitedMap(original map[string]bool) map[string]bool {
@@ -641,11 +951,7 @@ func GetBidirectionalVisited() int {
 
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		corsOrigin := os.Getenv("CORS_ORIGIN")
-		if corsOrigin == "" {
-			corsOrigin = "*" // fallback to allow all origins if not set
-		}
-		w.Header().Set("Access-Control-Allow-Origin", corsOrigin)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
