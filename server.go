@@ -641,7 +641,11 @@ func GetBidirectionalVisited() int {
 
 func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		corsOrigin := os.Getenv("CORS_ORIGIN")
+		if corsOrigin == "" {
+			corsOrigin = "*" // fallback to allow all origins if not set
+		}
+		w.Header().Set("Access-Control-Allow-Origin", corsOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
